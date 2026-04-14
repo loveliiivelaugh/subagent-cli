@@ -1,8 +1,11 @@
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { ensureConfigDir, getRunsDir } from './config.js';
+
+const execFileAsync = promisify(execFile);
 
 export async function runAgent({ agentName, agentConfig, task, cwd, background = false, dryRun = false }) {
   if ((agentConfig.kind || 'local') !== 'local') {
@@ -106,7 +109,7 @@ export async function sendAgentMessage({ fromAgent = 'subagent-cli', agentName, 
     }
   };
 
-  const request = buildWebhookRequest({ agentConfig, body: envelope });
+  const request = await buildWebhookRequest({ agentConfig, body: envelope });
 
   if (dryRun) {
     return {
@@ -167,7 +170,7 @@ function createRunId(agentName) {
   return `${stamp}-${agentName}`;
 }
 
-function buildWebhookRequest({ agentConfig, body }) {
+async function buildWebhookRequest({ agentConfig, body }) {
   const endpoint = agentConfig.transport?.endpoint;
   if (!endpoint) {
     throw new Error('Remote webhook agent is missing transport.endpoint');
@@ -178,7 +181,7 @@ function buildWebhookRequest({ agentConfig, body }) {
   };
 
   const auth = agentConfig.auth;
-  const secret = resolveSecretRef(auth?.secretRef);
+  const secret = await resolveSecretRef(auth?.secretRef);
 
   if (auth?.type === 'bearer') {
     if (!secret) throw new Error('Bearer auth requires a resolvable secretRef');
@@ -201,14 +204,63 @@ function buildWebhookRequest({ agentConfig, body }) {
   };
 }
 
-function resolveSecretRef(secretRef) {
+async function resolveSecretRef(secretRef) {
   if (!secretRef) return null;
   if (secretRef.startsWith('env://')) {
     const envKey = secretRef.slice('env://'.length);
     return process.env[envKey] || null;
   }
 
+  if (secretRef.startsWith('infisical://')) {
+    return await resolveInfisicalSecret(secretRef);
+  }
+
   throw new Error(`Unsupported secretRef scheme: ${secretRef}`);
+}
+
+async function resolveInfisicalSecret(secretRef) {
+  const locator = secretRef.slice('infisical://'.length);
+  const parts = locator.split('/').filter(Boolean);
+
+  if (parts.length === 0) {
+    throw new Error(`Invalid Infisical secretRef: ${secretRef}`);
+  }
+
+  const secretName = parts.at(-1);
+  const folderParts = parts.slice(0, -1);
+  const folderPath = `/${folderParts.join('/') || ''}`.replace(/\/+/g, '/');
+
+  const args = ['secrets', 'get', secretName, '--silent', '--plain'];
+  if (folderParts.length > 0) {
+    args.push('--path', folderPath);
+  }
+
+  const envName = process.env.SUBAGENT_INFISICAL_ENV;
+  const projectId = process.env.SUBAGENT_INFISICAL_PROJECT_ID;
+  const token = process.env.SUBAGENT_INFISICAL_TOKEN;
+  const domain = process.env.SUBAGENT_INFISICAL_DOMAIN || process.env.INFISICAL_API_URL;
+
+  if (envName) args.push('--env', envName);
+  if (projectId) args.push('--projectId', projectId);
+  if (token) args.push('--token', token);
+  if (domain) args.push('--domain', domain);
+
+  try {
+    const { stdout } = await execFileAsync('infisical', args, {
+      env: process.env,
+      maxBuffer: 1024 * 1024
+    });
+
+    const value = stdout.trim();
+    if (!value) {
+      throw new Error(`Infisical returned an empty value for ${secretRef}`);
+    }
+
+    return value;
+  } catch (error) {
+    const detail = error?.stderr?.trim() || error?.message || 'unknown error';
+    throw new Error(`Failed to resolve Infisical secret ${secretRef}: ${detail}`);
+  }
 }
 
 function redactRequestForOutput(request) {

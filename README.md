@@ -98,7 +98,7 @@ The config now supports a backwards-compatible `kind` field on agents:
 
 Current implementation includes schema normalization, validation, agent inspection, and an initial remote messaging path for webhook-based agents.
 
-Remote webhook auth currently supports secret refs via environment variables, for example:
+Remote webhook auth currently supports secret refs via environment variables or Infisical, for example:
 
 ```json
 {
@@ -106,6 +106,20 @@ Remote webhook auth currently supports secret refs via environment variables, fo
   "secretRef": "env://SUBAGENT_M5_TOKEN"
 }
 ```
+
+```json
+{
+  "type": "bearer",
+  "secretRef": "infisical://subagent/m5/token"
+}
+```
+
+For Infisical-backed resolution, `subagent-cli` currently expects runtime context via environment when needed, such as:
+
+- `SUBAGENT_INFISICAL_ENV`
+- `SUBAGENT_INFISICAL_PROJECT_ID`
+- `SUBAGENT_INFISICAL_TOKEN`
+- `SUBAGENT_INFISICAL_DOMAIN` or `INFISICAL_API_URL`
 
 Example remote agent entry:
 
