@@ -6,7 +6,7 @@ import {
   saveConfig,
   validateConfig
 } from './config.js';
-import { runAgent, runBatch } from './executor.js';
+import { runAgent, runBatch, sendAgentMessage } from './executor.js';
 import { routeTask } from './router.js';
 
 export async function runCli(argv) {
@@ -28,6 +28,9 @@ export async function runCli(argv) {
         return;
       case 'info':
         await cmdInfo(positionals.slice(1), flags);
+        return;
+      case 'message':
+        await cmdMessage(positionals.slice(1), flags);
         return;
       case 'route':
         await cmdRoute(positionals.slice(1), flags);
@@ -153,6 +156,48 @@ async function cmdInfo(args, flags) {
       name,
       defaultAgent: config.defaultAgent,
       agent: redactSecrets(agent)
+    },
+    flags
+  );
+}
+
+async function cmdMessage(args, flags) {
+  const agentName = String(args[0] || '').trim();
+  const message = args.slice(1).join(' ').trim();
+
+  if (!agentName || !message) {
+    throw new Error('Usage: subagent message <agent> "<message>" [--dry-run]');
+  }
+
+  const config = await loadOrInitConfig();
+  const agentConfig = config.agents[agentName];
+  if (!agentConfig?.enabled) {
+    throw new Error(`Agent not enabled: ${agentName}`);
+  }
+
+  const execution = await sendAgentMessage({
+    fromAgent: String(flags.from || 'subagent-cli'),
+    agentName,
+    agentConfig,
+    message,
+    dryRun: toBoolean(flags['dry-run'], false)
+  });
+
+  if (!execution.dryRun) {
+    await trackRun(config, {
+      task: message,
+      agent: agentName,
+      success: execution.ok,
+      background: false,
+      dryRun: false
+    });
+  }
+
+  printResult(
+    {
+      agent: agentName,
+      message,
+      execution
     },
     flags
   );
@@ -472,6 +517,7 @@ Usage:
   subagent config validate
   subagent agents [--json false]
   subagent info <agent> [--json false]
+  subagent message <agent> "<message>" [--dry-run] [--from <name>]
   subagent route "<task>" [--code] [--review] [--plan] [--research] [--private] [--background]
   subagent run "<task>" [--agent <name>] [--cwd <dir>] [--background] [--dry-run]
   subagent batch "<task>" [--agent <name>]... [--top 2] [--cwd <dir>] [--background] [--dry-run]
@@ -480,6 +526,7 @@ Usage:
 Examples:
   subagent config validate
   subagent info codex
+  subagent message m5 "check the queue worker logs" --dry-run
   subagent route "review this refactor for regressions" --review
   subagent run "implement the CLI flag parsing in this repo" --cwd ~/Projects/subagent-cli
   subagent run "summarize these logs locally" --private --background
@@ -489,6 +536,8 @@ Notes:
   - Auto-routing favors Codex for repo changes, Claude for review/planning, Gemini for ideation,
     Ollama for local/private work, and Antigravity for orchestration once configured.
   - Background runs write logs under ~/.config/subagent-cli/runs/.
-  - Config now supports local and remote agent definitions, though remote execution commands are still in progress.
+  - Config now supports local and remote agent definitions.
+  - subagent message supports local agents and remote webhook agents.
+  - Remote auth currently supports env:// secret refs for bearer or custom header auth.
 `);
 }

@@ -56,6 +56,10 @@ subagent stats
 - `subagent info <agent>`
 - `subagent stats`
 
+### Messaging
+
+- `subagent message <agent> "<message>" [--dry-run]`
+
 ### Routing
 
 - `subagent route "<task>" [--code] [--review] [--plan] [--research] [--private] [--background]`
@@ -92,7 +96,40 @@ The config now supports a backwards-compatible `kind` field on agents:
 - `kind: "local"` for command-based local agents
 - `kind: "remote"` for future federated agents using transports like webhooks
 
-Current implementation includes schema normalization, validation, and agent inspection. Remote execution commands are the next step.
+Current implementation includes schema normalization, validation, agent inspection, and an initial remote messaging path for webhook-based agents.
+
+Remote webhook auth currently supports secret refs via environment variables, for example:
+
+```json
+{
+  "type": "bearer",
+  "secretRef": "env://SUBAGENT_M5_TOKEN"
+}
+```
+
+Example remote agent entry:
+
+```json
+{
+  "m5": {
+    "kind": "remote",
+    "label": "M5",
+    "enabled": true,
+    "description": "Infra/operator agent on machine m5.",
+    "roles": ["infra-operator"],
+    "capabilities": ["shell", "docker", "openclaw", "monitoring"],
+    "transport": {
+      "type": "webhook",
+      "endpoint": "https://m5.tailnet.ts.net:18789/hooks/agent",
+      "method": "POST"
+    },
+    "auth": {
+      "type": "bearer",
+      "secretRef": "env://SUBAGENT_M5_TOKEN"
+    }
+  }
+}
+```
 
 ## Suggested direction
 
