@@ -91,35 +91,79 @@ Runs launched in the background write logs to:
 
 The generated config includes agent commands for `codex`, `claude`, `gemini`, and `ollama`. `antigravity` is present but disabled by default because no local binary was detected during creation.
 
+### Current config workflow
+
+Right now, federated-agent config is edited manually in the JSON file.
+
+Recommended workflow:
+
+```bash
+subagent config path
+$EDITOR ~/.config/subagent-cli/config.json
+subagent config validate
+subagent info m5
+subagent agents
+```
+
+Today, the CLI can:
+
+- initialize config
+- print the config path
+- set the default agent
+- validate config shape
+- inspect an agent definition
+- route, run, batch, and message using the current config
+
+Today, the CLI does *not yet* have dedicated config mutation commands like:
+
+- `subagent config add-remote ...`
+- `subagent config set ...`
+- `subagent config enable ...`
+- `subagent config disable ...`
+
+So the current operator experience is:
+
+- edit JSON manually
+- validate with the CLI
+- inspect with the CLI
+
+### Config model
+
 The config now supports a backwards-compatible `kind` field on agents:
 
 - `kind: "local"` for command-based local agents
-- `kind: "remote"` for future federated agents using transports like webhooks
+- `kind: "remote"` for federated agents using transports like webhooks
 
-Current implementation includes schema normalization, validation, agent inspection, and an initial remote messaging path for webhook-based agents.
+Current implementation includes:
 
-Remote webhook auth currently supports secret refs via environment variables or Infisical, for example:
+- schema normalization
+- backwards-compatible config loading
+- validation
+- agent inspection
+- local execution and routing
+- initial remote webhook messaging
+
+### Local agent shape
+
+Example local agent:
 
 ```json
 {
-  "type": "bearer",
-  "secretRef": "env://SUBAGENT_M5_TOKEN"
+  "codex": {
+    "kind": "local",
+    "label": "Codex",
+    "enabled": true,
+    "command": "codex",
+    "args": ["exec", "--skip-git-repo-check"],
+    "promptMode": "argv",
+    "description": "Best default for repo-aware implementation, edits, and execution-heavy work.",
+    "roles": ["implementer"],
+    "capabilities": ["code", "repo-edits", "shell"]
+  }
 }
 ```
 
-```json
-{
-  "type": "bearer",
-  "secretRef": "infisical://subagent/m5/token"
-}
-```
-
-For Infisical-backed resolution, `subagent-cli` currently expects runtime context via environment when needed, such as:
-
-- `SUBAGENT_INFISICAL_ENV`
-- `SUBAGENT_INFISICAL_PROJECT_ID`
-- `SUBAGENT_INFISICAL_TOKEN`
-- `SUBAGENT_INFISICAL_DOMAIN` or `INFISICAL_API_URL`
+### Remote agent shape
 
 Example remote agent entry:
 
@@ -132,6 +176,11 @@ Example remote agent entry:
     "description": "Infra/operator agent on machine m5.",
     "roles": ["infra-operator"],
     "capabilities": ["shell", "docker", "openclaw", "monitoring"],
+    "labels": {
+      "machine": "m5",
+      "network": "tailscale",
+      "environment": "homelab"
+    },
     "transport": {
       "type": "webhook",
       "endpoint": "https://m5.tailnet.ts.net:18789/hooks/agent",
@@ -139,11 +188,101 @@ Example remote agent entry:
     },
     "auth": {
       "type": "bearer",
-      "secretRef": "env://SUBAGENT_M5_TOKEN"
+      "secretRef": "infisical://subagent/m5/token"
     }
   }
 }
 ```
+
+### Remote auth and secret refs
+
+Remote webhook auth currently supports secret refs via environment variables or Infisical.
+
+Environment variable example:
+
+```json
+{
+  "type": "bearer",
+  "secretRef": "env://SUBAGENT_M5_TOKEN"
+}
+```
+
+Infisical example:
+
+```json
+{
+  "type": "bearer",
+  "secretRef": "infisical://subagent/m5/token"
+}
+```
+
+Custom header auth is also supported, for example:
+
+```json
+{
+  "type": "header",
+  "headerName": "x-subagent-key",
+  "secretRef": "infisical://subagent/m5/key"
+}
+```
+
+For Infisical-backed resolution, `subagent-cli` currently expects runtime context via environment when needed, such as:
+
+- `SUBAGENT_INFISICAL_ENV`
+- `SUBAGENT_INFISICAL_PROJECT_ID`
+- `SUBAGENT_INFISICAL_TOKEN`
+- `SUBAGENT_INFISICAL_DOMAIN` or `INFISICAL_API_URL`
+
+### Remote message behavior
+
+`subagent message <agent> "<message>"` now supports:
+
+- local agents, by delegating through the configured local command
+- remote webhook agents, by constructing a standardized JSON envelope
+
+Example dry run:
+
+```bash
+subagent message m5 "check the queue worker logs" --dry-run
+```
+
+The remote webhook envelope currently looks like:
+
+```json
+{
+  "type": "message",
+  "from": "subagent-cli",
+  "to": "m5",
+  "correlationId": "uuid",
+  "timestamp": "2026-04-14T02:00:00.000Z",
+  "message": "check the queue worker logs",
+  "metadata": {
+    "source": "subagent-cli",
+    "host": "machine-hostname",
+    "priority": "normal"
+  }
+}
+```
+
+Headers are constructed from the configured auth block and are redacted in dry-run output.
+
+### Validation and inspection
+
+Useful commands while editing federated agents:
+
+```bash
+subagent config validate
+subagent agents
+subagent info m5
+```
+
+`subagent config validate` checks:
+
+- config structure
+- default agent validity
+- required local fields like `command`
+- required remote fields like `transport.type` and webhook `endpoint`
+- auth type presence when auth is configured
 
 ## Suggested direction
 
