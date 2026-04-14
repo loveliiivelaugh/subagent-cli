@@ -48,10 +48,12 @@ subagent stats
 - `subagent config init [--force]`
 - `subagent config path`
 - `subagent config set-default <agent>`
+- `subagent config validate`
 
 ### Discovery
 
 - `subagent agents`
+- `subagent info <agent>`
 - `subagent stats`
 
 ### Routing
@@ -84,6 +86,13 @@ Runs launched in the background write logs to:
 - `~/.config/subagent-cli/runs/`
 
 The generated config includes agent commands for `codex`, `claude`, `gemini`, and `ollama`. `antigravity` is present but disabled by default because no local binary was detected during creation.
+
+The config now supports a backwards-compatible `kind` field on agents:
+
+- `kind: "local"` for command-based local agents
+- `kind: "remote"` for future federated agents using transports like webhooks
+
+Current implementation includes schema normalization, validation, and agent inspection. Remote execution commands are the next step.
 
 ## Suggested direction
 

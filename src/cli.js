@@ -3,7 +3,8 @@ import {
   getConfigPath,
   loadConfig,
   makeDefaultConfig,
-  saveConfig
+  saveConfig,
+  validateConfig
 } from './config.js';
 import { runAgent, runBatch } from './executor.js';
 import { routeTask } from './router.js';
@@ -24,6 +25,9 @@ export async function runCli(argv) {
         return;
       case 'agents':
         await cmdAgents(flags);
+        return;
+      case 'info':
+        await cmdInfo(positionals.slice(1), flags);
         return;
       case 'route':
         await cmdRoute(positionals.slice(1), flags);
@@ -84,16 +88,42 @@ async function cmdConfig(args, flags) {
     return;
   }
 
-  throw new Error('Usage: subagent config <path|init|set-default>');
+  if (action === 'validate') {
+    const config = await loadOrInitConfig();
+    const report = validateConfig(config);
+    printResult(
+      {
+        configPath: getConfigPath(),
+        ...report
+      },
+      flags
+    );
+
+    if (!report.valid) {
+      process.exitCode = 1;
+    }
+    return;
+  }
+
+  throw new Error('Usage: subagent config <path|init|set-default|validate>');
 }
 
 async function cmdAgents(flags) {
   const config = await loadOrInitConfig();
   const data = Object.entries(config.agents).map(([name, agent]) => ({
     name,
+    kind: agent.kind || 'local',
     enabled: agent.enabled,
     command: agent.command,
     args: agent.args,
+    transport: agent.transport
+      ? {
+          type: agent.transport.type,
+          endpoint: agent.transport.endpoint
+        }
+      : undefined,
+    roles: agent.roles || [],
+    capabilities: agent.capabilities || [],
     description: agent.description
   }));
 
@@ -101,6 +131,28 @@ async function cmdAgents(flags) {
     {
       defaultAgent: config.defaultAgent,
       agents: data
+    },
+    flags
+  );
+}
+
+async function cmdInfo(args, flags) {
+  const name = String(args[0] || '').trim();
+  if (!name) {
+    throw new Error('Usage: subagent info <agent>');
+  }
+
+  const config = await loadOrInitConfig();
+  const agent = config.agents[name];
+  if (!agent) {
+    throw new Error(`Unknown agent: ${name}`);
+  }
+
+  printResult(
+    {
+      name,
+      defaultAgent: config.defaultAgent,
+      agent: redactSecrets(agent)
     },
     flags
   );
@@ -386,6 +438,28 @@ function printResult(result, flags) {
   console.log(result);
 }
 
+function redactSecrets(value) {
+  if (Array.isArray(value)) {
+    return value.map(redactSecrets);
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const redacted = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (['secret', 'token', 'password', 'apiKey'].includes(key)) {
+      redacted[key] = '[redacted]';
+      continue;
+    }
+
+    redacted[key] = redactSecrets(entry);
+  }
+
+  return redacted;
+}
+
 function printHelp() {
   console.log(`subagent-cli
 
@@ -395,13 +469,17 @@ Usage:
   subagent config init [--force]
   subagent config path
   subagent config set-default <agent>
+  subagent config validate
   subagent agents [--json false]
+  subagent info <agent> [--json false]
   subagent route "<task>" [--code] [--review] [--plan] [--research] [--private] [--background]
   subagent run "<task>" [--agent <name>] [--cwd <dir>] [--background] [--dry-run]
   subagent batch "<task>" [--agent <name>]... [--top 2] [--cwd <dir>] [--background] [--dry-run]
   subagent stats
 
 Examples:
+  subagent config validate
+  subagent info codex
   subagent route "review this refactor for regressions" --review
   subagent run "implement the CLI flag parsing in this repo" --cwd ~/Projects/subagent-cli
   subagent run "summarize these logs locally" --private --background
@@ -411,6 +489,6 @@ Notes:
   - Auto-routing favors Codex for repo changes, Claude for review/planning, Gemini for ideation,
     Ollama for local/private work, and Antigravity for orchestration once configured.
   - Background runs write logs under ~/.config/subagent-cli/runs/.
-  - Antigravity is included but disabled by default until you set a working command in config.
+  - Config now supports local and remote agent definitions, though remote execution commands are still in progress.
 `);
 }
