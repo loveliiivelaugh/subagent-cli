@@ -134,7 +134,7 @@ So the current operator experience is:
 The config now supports a backwards-compatible `kind` field on agents:
 
 - `kind: "local"` for command-based local agents
-- `kind: "remote"` for federated agents using transports like webhooks
+- `kind: "remote"` for federated agents using transports like webhooks or ssh
 
 Current implementation includes:
 
@@ -144,7 +144,7 @@ Current implementation includes:
 - doctor inspection and repair for known shape problems
 - agent inspection
 - local execution and routing
-- initial remote webhook messaging
+- initial remote webhook and ssh messaging
 
 ### Local agent shape
 
@@ -197,6 +197,42 @@ Example remote agent entry:
 }
 ```
 
+### SSH remote agent shape
+
+For direct shell-based OpenClaw invocation on a remote machine, use `transport.type: "ssh"`.
+
+```json
+{
+  "m5-ssh": {
+    "kind": "remote",
+    "label": "M5 SSH",
+    "enabled": true,
+    "description": "Direct SSH transport to OpenClaw on m5.",
+    "transport": {
+      "type": "ssh",
+      "host": "m5",
+      "agent": "main",
+      "remoteCommand": "openclaw"
+    }
+  }
+}
+```
+
+SSH transport currently shells into the remote host and runs:
+
+```bash
+openclaw agent --agent <agent> --message "..."
+```
+
+Optional SSH transport fields:
+
+- `host` (required): SSH host alias or host string
+- `agent` (optional): OpenClaw agent id, defaults to `main`
+- `remoteCommand` (optional): remote `openclaw` binary name or full path, defaults to detected local binary basename/path fallback
+- `sshCommand` (optional): SSH client binary, defaults to `ssh`
+- `sshArgs` (optional): extra SSH args array, for example `[`-i`, `~/.ssh/id_ed25519`]`
+- `openclawArgs` (optional): extra args appended to `openclaw agent ...`
+
 ### Remote auth and secret refs
 
 Remote webhook auth currently supports secret refs via environment variables or Infisical.
@@ -242,6 +278,7 @@ For Infisical-backed resolution, `subagent-cli` currently expects runtime contex
 
 - local agents, by delegating through the configured local command
 - remote webhook agents, by constructing a standardized JSON envelope
+- remote ssh agents, by running `openclaw agent` on the remote host over SSH
 
 Example dry run:
 

@@ -202,6 +202,12 @@ export function validateConfig(config) {
         if (agent.transport.type === 'webhook' && !agent.transport.endpoint) {
           errors.push(`agents.${name}.transport.endpoint is required for webhook agents.`);
         }
+        if (agent.transport.type === 'ssh' && !agent.transport.host) {
+          errors.push(`agents.${name}.transport.host is required for ssh agents.`);
+        }
+        if (agent.transport.type && !['webhook', 'ssh'].includes(agent.transport.type)) {
+          errors.push(`agents.${name}.transport.type=${agent.transport.type} is unsupported.`);
+        }
       }
     }
 
