@@ -6,6 +6,7 @@ import {
   saveConfig,
   validateConfig
 } from './config.js';
+import { inspectConfigDoctor, doctorFixConfig } from './doctor.js';
 import { runAgent, runBatch, sendAgentMessage } from './executor.js';
 import { routeTask } from './router.js';
 
@@ -43,6 +44,9 @@ export async function runCli(argv) {
         return;
       case 'stats':
         await cmdStats(flags);
+        return;
+      case 'doctor':
+        await cmdDoctor(flags);
         return;
       default:
         throw new Error(`Unknown command: ${command}`);
@@ -351,6 +355,16 @@ async function cmdStats(flags) {
   );
 }
 
+async function cmdDoctor(flags) {
+  const shouldFix = toBoolean(flags.fix, false);
+  const result = shouldFix ? await doctorFixConfig() : await inspectConfigDoctor();
+  printResult(result, flags);
+
+  if (!result.ok) {
+    process.exitCode = 1;
+  }
+}
+
 function resolveRunAgent({ config, task, flags }) {
   const explicit = String(flags.agent || '').trim();
   if (explicit) return explicit;
@@ -522,6 +536,7 @@ Usage:
   subagent run "<task>" [--agent <name>] [--cwd <dir>] [--background] [--dry-run]
   subagent batch "<task>" [--agent <name>]... [--top 2] [--cwd <dir>] [--background] [--dry-run]
   subagent stats
+  subagent doctor [--fix]
 
 Examples:
   subagent config validate
@@ -531,6 +546,7 @@ Examples:
   subagent run "implement the CLI flag parsing in this repo" --cwd ~/Projects/subagent-cli
   subagent run "summarize these logs locally" --private --background
   subagent batch "compare approaches for background worker orchestration" --agent claude --agent gemini
+  subagent doctor --fix
 
 Notes:
   - Auto-routing favors Codex for repo changes, Claude for review/planning, Gemini for ideation,
@@ -539,5 +555,6 @@ Notes:
   - Config now supports local and remote agent definitions.
   - subagent message supports local agents and remote webhook agents.
   - Remote auth currently supports env:// secret refs for bearer or custom header auth.
+  - subagent doctor flags malformed config and --fix repairs known shape problems.
 `);
 }

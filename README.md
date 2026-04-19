@@ -49,6 +49,7 @@ subagent stats
 - `subagent config path`
 - `subagent config set-default <agent>`
 - `subagent config validate`
+- `subagent doctor [--fix]`
 
 ### Discovery
 
@@ -101,6 +102,7 @@ Recommended workflow:
 subagent config path
 $EDITOR ~/.config/subagent-cli/config.json
 subagent config validate
+subagent doctor
 subagent info m5
 subagent agents
 ```
@@ -139,6 +141,7 @@ Current implementation includes:
 - schema normalization
 - backwards-compatible config loading
 - validation
+- doctor inspection and repair for known shape problems
 - agent inspection
 - local execution and routing
 - initial remote webhook messaging
@@ -283,6 +286,34 @@ subagent info m5
 - required local fields like `command`
 - required remote fields like `transport.type` and webhook `endpoint`
 - auth type presence when auth is configured
+
+`subagent doctor` adds repair-oriented checks for known config drift.
+
+Today, `subagent doctor --fix` repairs:
+
+- misplaced top-level agent entries that should live under `config.agents`
+
+This is especially useful if a manual JSON edit accidentally creates this broken shape:
+
+```json
+{
+  "agents": {
+    "m5": { "kind": "remote", "enabled": true }
+  },
+  "m1": { "kind": "remote", "enabled": true }
+}
+```
+
+After `subagent doctor --fix`, that becomes:
+
+```json
+{
+  "agents": {
+    "m5": { "kind": "remote", "enabled": true },
+    "m1": { "kind": "remote", "enabled": true }
+  }
+}
+```
 
 ## Suggested direction
 

@@ -19,14 +19,19 @@ export async function ensureConfigDir() {
   await fs.mkdir(RUNS_DIR, { recursive: true, mode: 0o700 });
 }
 
-export async function loadConfig() {
+export async function loadRawConfig() {
   try {
     const raw = await fs.readFile(CONFIG_PATH, 'utf8');
-    return normalizeConfig(JSON.parse(raw));
+    return JSON.parse(raw);
   } catch (error) {
     if (error.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+export async function loadConfig() {
+  const raw = await loadRawConfig();
+  return raw ? normalizeConfig(raw) : null;
 }
 
 export async function saveConfig(config) {
