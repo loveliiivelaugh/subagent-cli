@@ -19,14 +19,19 @@ export async function ensureConfigDir() {
   await fs.mkdir(RUNS_DIR, { recursive: true, mode: 0o700 });
 }
 
-export async function loadConfig() {
+export async function loadRawConfig() {
   try {
     const raw = await fs.readFile(CONFIG_PATH, 'utf8');
-    return normalizeConfig(JSON.parse(raw));
+    return JSON.parse(raw);
   } catch (error) {
     if (error.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+export async function loadConfig() {
+  const raw = await loadRawConfig();
+  return raw ? normalizeConfig(raw) : null;
 }
 
 export async function saveConfig(config) {
@@ -196,6 +201,12 @@ export function validateConfig(config) {
         if (!agent.transport.type) errors.push(`agents.${name}.transport.type is required.`);
         if (agent.transport.type === 'webhook' && !agent.transport.endpoint) {
           errors.push(`agents.${name}.transport.endpoint is required for webhook agents.`);
+        }
+        if (agent.transport.type === 'ssh' && !agent.transport.host) {
+          errors.push(`agents.${name}.transport.host is required for ssh agents.`);
+        }
+        if (agent.transport.type && !['webhook', 'ssh'].includes(agent.transport.type)) {
+          errors.push(`agents.${name}.transport.type=${agent.transport.type} is unsupported.`);
         }
       }
     }

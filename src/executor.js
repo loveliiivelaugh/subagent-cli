@@ -1,4 +1,4 @@
-import { execFile, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -91,55 +91,96 @@ export async function sendAgentMessage({ fromAgent = 'subagent-cli', agentName, 
   }
 
   const transport = agentConfig.transport || {};
-  if (transport.type !== 'webhook') {
-    throw new Error(`Unsupported remote transport: ${transport.type || 'unknown'}`);
-  }
 
-  const envelope = {
-    type: 'message',
-    from: fromAgent,
-    to: agentName,
-    correlationId: crypto.randomUUID(),
-    timestamp: new Date().toISOString(),
-    message,
-    metadata: {
-      source: 'subagent-cli',
-      host: os.hostname(),
-      priority: 'normal'
+  if (transport.type === 'webhook') {
+    const envelope = {
+      type: 'message',
+      from: fromAgent,
+      to: agentName,
+      correlationId: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      message,
+      metadata: {
+        source: 'subagent-cli',
+        host: os.hostname(),
+        priority: 'normal'
+      }
+    };
+
+    const request = await buildWebhookRequest({ agentConfig, body: envelope });
+
+    if (dryRun) {
+      return {
+        ok: true,
+        dryRun: true,
+        agent: agentName,
+        transport: transport.type,
+        request: redactRequestForOutput(request)
+      };
     }
-  };
 
-  const request = await buildWebhookRequest({ agentConfig, body: envelope });
+    const response = await fetch(request.url, request.init);
+    const text = await response.text();
+    let data = text;
 
-  if (dryRun) {
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = text;
+    }
+
     return {
-      ok: true,
-      dryRun: true,
+      ok: response.ok,
       agent: agentName,
       transport: transport.type,
-      request: redactRequestForOutput(request)
+      status: response.status,
+      statusText: response.statusText,
+      request: redactRequestForOutput(request),
+      response: data
     };
   }
 
-  const response = await fetch(request.url, request.init);
-  const text = await response.text();
-  let data = text;
+  if (transport.type === 'ssh') {
+    const commandSpec = buildSshMessageCommand({ agentName, agentConfig, message });
 
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
+    if (dryRun) {
+      return {
+        ok: true,
+        dryRun: true,
+        agent: agentName,
+        transport: transport.type,
+        command: renderCommand(commandSpec)
+      };
+    }
+
+    try {
+      const { stdout, stderr } = await execFileAsync(commandSpec.command, commandSpec.args, {
+        env: process.env,
+        maxBuffer: 1024 * 1024
+      });
+
+      return {
+        ok: true,
+        agent: agentName,
+        transport: transport.type,
+        command: renderCommand(commandSpec),
+        response: stdout.trim(),
+        stderr: stderr.trim() || null
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        agent: agentName,
+        transport: transport.type,
+        command: renderCommand(commandSpec),
+        exitCode: error.code ?? null,
+        response: error.stdout?.trim() || '',
+        stderr: error.stderr?.trim() || error.message
+      };
+    }
   }
 
-  return {
-    ok: response.ok,
-    agent: agentName,
-    transport: transport.type,
-    status: response.status,
-    statusText: response.statusText,
-    request: redactRequestForOutput(request),
-    response: data
-  };
+  throw new Error(`Unsupported remote transport: ${transport.type || 'unknown'}`);
 }
 
 function buildCommand({ agentConfig, task }) {
@@ -168,6 +209,44 @@ function quoteShell(value) {
 function createRunId(agentName) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   return `${stamp}-${agentName}`;
+}
+
+function buildSshMessageCommand({ agentName, agentConfig, message }) {
+  const transport = agentConfig.transport || {};
+  const sshCommand = transport.sshCommand || 'ssh';
+  const sshArgs = Array.isArray(transport.sshArgs) ? [...transport.sshArgs] : [];
+  const host = transport.host;
+  const openclawCommand = transport.remoteCommand || detectRemoteOpenClawCommand();
+  const targetAgent = transport.agent || 'main';
+  const extraArgs = Array.isArray(transport.openclawArgs) ? [...transport.openclawArgs] : [];
+  const remoteParts = [
+    quoteShell(openclawCommand),
+    'agent',
+    '--agent',
+    quoteShell(targetAgent),
+    '--message',
+    quoteShell(message),
+    ...extraArgs.map(quoteShell)
+  ];
+
+  return {
+    command: sshCommand,
+    args: [...sshArgs, host, remoteParts.join(' ')]
+  };
+}
+
+function detectRemoteOpenClawCommand() {
+  try {
+    const path = execFileSync('which', ['openclaw'], {
+      env: process.env,
+      encoding: 'utf8'
+    }).trim();
+    if (path) return path;
+  } catch {
+    // ignore and fall through
+  }
+
+  return 'openclaw';
 }
 
 async function buildWebhookRequest({ agentConfig, body }) {
